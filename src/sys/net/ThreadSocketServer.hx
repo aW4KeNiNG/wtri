@@ -36,6 +36,11 @@ private typedef ClientInfos<Client> = {
 	var bufpos : Int;
 }
 
+enum ThreadMessage
+{
+    Stop;
+}
+
 @:require(cpp||neko)
 class ThreadSocketServer<Client,Message> {
 
@@ -66,6 +71,7 @@ class ThreadSocketServer<Client,Message> {
 
 	var threads : Array<ThreadInfos>;
 	var sock : Socket;
+    var sockWorker : Thread;
 	var worker : Thread;
 	var timer : Thread;
 
@@ -86,13 +92,16 @@ class ThreadSocketServer<Client,Message> {
 	}
 
 	public function start() {
-		sock = new Socket();
-		sock.bind( new sys.net.Host( host ), port );
-		sock.listen( numConnections );
 		init();
-		while( true )
-			try addSocket( sock.accept() ) catch(e:Dynamic) logError(e);
 	}
+
+    public function stop() {
+        if(sock != null)
+        {
+            sockWorker.sendMessage(ThreadMessage.Stop);
+            sock.close();
+        }
+    }
 
 	public function addSocket( s : Socket ) {
 		s.setBlocking( false );
@@ -112,6 +121,33 @@ class ThreadSocketServer<Client,Message> {
 	public function work( f : Void->Void ) {
 		worker.sendMessage(f);
 	}
+
+    function runSockWorker() {
+        sock = new Socket();
+        sock.bind( new sys.net.Host( host ), port );
+        sock.listen( numConnections );
+
+        while( true )
+        {
+            var msg = Thread.readMessage(false);
+            if(msg != null && msg == ThreadMessage.Stop)
+                break;
+
+            try addSocket( sock.accept() ) catch(e:Dynamic) logError(e);
+        }
+
+        sock = null;
+
+        for( i in 0...nthreads ) {
+            var t = threads[i];
+            var j = t.socks.length;
+            while(j-- > 0)
+            {
+                var s = t.socks[j];
+                stopClient(s);
+            }
+        }
+    }
 
 	function runThread( t : ThreadInfos ) {
 		while( true ) {
@@ -231,6 +267,7 @@ class ThreadSocketServer<Client,Message> {
 	}
 
 	function init() {
+        sockWorker = Thread.create( runSockWorker );
 		worker = Thread.create( runWorker );
 		timer = Thread.create( runTimer );
 		for( i in 0...nthreads ) {
