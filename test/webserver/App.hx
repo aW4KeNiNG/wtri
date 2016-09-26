@@ -1,3 +1,5 @@
+package webserver;
+
 import sys.FileSystem;
 import Sys.println;
 
@@ -44,5 +46,7 @@ class App
         try s.start() catch(e:Dynamic) {
             error(e);
         }
+
+        while(true){Sys.sleep(10);}
     }
 }
