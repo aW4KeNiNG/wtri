@@ -7,6 +7,7 @@ import haxe.Template;
 import haxe.net.HTTPHeaders;
 import haxe.net.HTTPRequest;
 import haxe.net.HTTPStatusCode;
+import mime.Mime;
 
 using StringTools;
 
@@ -21,33 +22,6 @@ class WebServerClient extends sys.net.WebServerClient {
 
 		super( socket );
 		this.root = root;
-
-		/*
-		mime = [
-			'css' 	=> 'text/css',
-			'gif' 	=> 'image/gif',
-			'html' 	=> 'text/html',
-			'jpg' 	=> 'image/jpeg',
-			'jpeg' 	=> 'image/jpeg',
-			'js' 	=> 'application/javascript',
-			//'mp3' 	=> 'audio/mpeg',
-			'mpg' 	=> 'audio/mpeg',
-			'mpeg' 	=> 'audio/mpeg',
-			'ogg' 	=> 'application/ogg',
-			//'php' 	=> 'text/php',
-			'png' 	=> 'image/png',
-			'txt' 	=> 'text/plain',
-			'wav' 	=> 'audio/x-wav',
-			'xml' 	=> 'text/xml'
-		];
-		*/
-
-		mime.set( 'mpg', 'audio/mpeg' );
-		mime.set( 'mpeg', 'audio/mpeg' );
-		mime.set( 'ogg', 'application/ogg' );
-		mime.set( 'png', 'image/png' );
-		mime.set( 'wav', 'audio/x-wav' );
-		mime.set( 'xml', 'text/xml' );
 
 		indexFileNames = ['index'];
 		indexFileTypes = ['html','htm'];
@@ -68,11 +42,11 @@ class WebServerClient extends sys.net.WebServerClient {
 			fileNotFound( path, r.url );
 		} else {
 			var contentType : String = null;
-			if( r.headers.exists( 'Accept' ) ) {
-				var ctype = r.headers.get( 'Accept' );
-				ctype = ctype.substr( 0, ctype.indexOf( ',' ) ).trim();
-				if( mime.exists( ctype ) ) contentType = ctype;
-			}
+//			if( r.headers.exists( 'Accept' ) ) {
+//				var ctype = r.headers.get( 'Accept' );
+//				ctype = ctype.substr( 0, ctype.indexOf( ',' ) ).trim();
+//				if( Mime.extension( ctype ) != null ) contentType = ctype;
+//			}
 			if( contentType == null ) contentType = getFileContentType( filePath );
 			responseHeaders.set( 'Content-Type', contentType );
 			/* TODO execute neko modules

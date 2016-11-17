@@ -5,6 +5,7 @@ import haxe.io.Bytes;
 import haxe.io.Path;
 import haxe.net.HTTPRequest;
 import haxe.net.HTTPHeaders;
+import mime.Mime;
 
 private typedef HTTPReturnCode = {
 	var code : Int;
@@ -15,8 +16,6 @@ private typedef HTTPReturnCode = {
 */
 class WebServerClient {
 
-	public var mime : Map<String,String>;
-
 	var socket : Socket;
 	var output : haxe.io.Output;
 	var responseCode : HTTPReturnCode;
@@ -25,17 +24,6 @@ class WebServerClient {
 	public function new( socket : Socket ) {
 		this.socket = socket;
 		output = socket.output;
-		mime = [
-			'css' 	=> 'text/css',
-			'gif' 	=> 'image/gif',
-			'html' 	=> 'text/html',
-			'jpg' 	=> 'image/jpeg',
-			'jpeg' 	=> 'image/jpeg',
-			'js' 	=> 'application/javascript',
-			'png' 	=> 'image/png',
-			'txt' 	=> 'text/plain',
-			'xml' 	=> 'text/xml'
-		];
 	}
 
 	/**
@@ -54,8 +42,7 @@ class WebServerClient {
 	}
 
 	function getFileContentType( path : String ) : String {
-		var x = Path.extension( path );
-		return mime.exists(x) ? mime.get(x) : 'unknown/unknown';
+        return Mime.lookup(Path.extension( path ));
 	}
 
 	function createResponseHeaders() : HTTPHeaders {

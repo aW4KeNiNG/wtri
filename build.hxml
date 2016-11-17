@@ -2,6 +2,7 @@
 -cp test
 -cp src
 -lib hxargs
+-lib mime
 -main webserver.App
 -resource res/index.html@index
 -resource res/error.html@error
