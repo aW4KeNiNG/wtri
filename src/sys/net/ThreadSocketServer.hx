@@ -39,9 +39,9 @@ private typedef ClientInfos<Client> = {
 enum ThreadMessage
 {
     Stop;
+    Socket(s:Socket, cnx:Bool);
 }
 
-@:require(cpp||neko)
 class ThreadSocketServer<Client,Message> {
 
 	public dynamic function clientConnected( s : Socket ) : Client return null;
@@ -96,9 +96,10 @@ class ThreadSocketServer<Client,Message> {
 	}
 
     public function stop() {
-        if(sock != null)
+        if(sockWorker != null)
         {
             sockWorker.sendMessage(ThreadMessage.Stop);
+            sock.shutdown(true, true);
             sock.close();
         }
     }
@@ -108,22 +109,34 @@ class ThreadSocketServer<Client,Message> {
 		work( addClient.bind( s ) );
 	}
 
-	public function stopClient( s : Socket ) {
-		var infos : ClientInfos<Client> = s.custom;
-		try s.shutdown(true,true) catch( e : Dynamic ) {};
-		infos.thread.t.sendMessage( { s : s, cnx : false } );
-	}
-
 	public function sendData( s : Socket, data : String ) {
 		try s.write( data ) catch( e : Dynamic ) stopClient( s );
 	}
 
 	public function work( f : Void->Void ) {
-		worker.sendMessage(f);
+        if(worker != null)
+		    worker.sendMessage(f);
 	}
+
+    function init() {
+        sockWorker = Thread.create( runSockWorker );
+        worker = Thread.create( runWorker );
+        timer = Thread.create( runTimer );
+        for( i in 0...nthreads ) {
+            var t = {
+                id : i,
+                t : null,
+                socks : new Array(),
+                p : new Poll( maxSockPerThread )
+            };
+            threads.push(t);
+            t.t = Thread.create( runThread.bind( t ) );
+        }
+    }
 
     function runSockWorker() {
         sock = new Socket();
+        sock.setBlocking(#if mobile false #else true #end);
         sock.bind( new sys.net.Host( host ), port );
         sock.listen( numConnections );
 
@@ -131,12 +144,17 @@ class ThreadSocketServer<Client,Message> {
         {
             var msg = Thread.readMessage(false);
             if(msg != null && msg == ThreadMessage.Stop)
+            {
                 break;
+            }
 
             try addSocket( sock.accept() ) catch(e:Dynamic) logError(e);
         }
 
         sock = null;
+
+        timer.sendMessage(ThreadMessage.Stop);
+        worker.sendMessage(ThreadMessage.Stop);
 
         for( i in 0...nthreads ) {
             var t = threads[i];
@@ -146,16 +164,80 @@ class ThreadSocketServer<Client,Message> {
                 var s = t.socks[j];
                 stopClient(s);
             }
+            t.t.sendMessage(ThreadMessage.Stop);
+        }
+
+        sockWorker = null;
+    }
+
+    function runWorker() {
+        while( true ) {
+            var f:Dynamic = Thread.readMessage(true);
+            if(f != null && f == ThreadMessage.Stop)
+            {
+                worker = null;
+                break;
+            }
+
+            try f() catch( e : Dynamic ) logError(e);
+            try afterEvent() catch( e : Dynamic ) logError(e);
         }
     }
 
 	function runThread( t : ThreadInfos ) {
 		while( true ) {
-			try loopThread(t) catch( e : Dynamic ) {
+			try
+            {
+                if( t.socks.length > 0 )
+                for( s in t.p.poll( t.socks, connectLag ) ) {
+                    var infos : ClientInfos<Client> = s.custom;
+                    try {
+                        readClientData(infos);
+                    } catch( e : Dynamic ) {
+                        t.socks.remove(s);
+                        if( !Std.is(e,haxe.io.Eof) && !Std.is(e,haxe.io.Error) )
+                            logError(e);
+                        work(doClientDisconnected.bind(s,infos.client));
+                    }
+                }
+                while( true ) {
+                    var m:ThreadMessage  = Thread.readMessage( t.socks.length == 0 );
+                    if( m == null )
+                        break;
+                    switch(m)
+                    {
+                        case ThreadMessage.Stop:
+                            return;
+                        case ThreadMessage.Socket(s, cnx):
+                            if( cnx )
+                                t.socks.push( s );
+                            else if( t.socks.remove( s ) ) {
+                                var infos : ClientInfos<Client> = s.custom;
+                                work( doClientDisconnected.bind( s, infos.client ) );
+                            }
+                    }
+                }
+            }
+            catch( e : Dynamic ) {
 				logError(e);
 			}
 		}
 	}
+
+    function runTimer() {
+        var l = new Lock();
+        while( true ) {
+            l.wait( updateTime );
+
+            var msg = Thread.readMessage(false);
+            if((msg != null && msg == ThreadMessage.Stop) || worker == null)
+            {
+                timer = null;
+                break;
+            }
+            work( update );
+        }
+    }
 
 	function readClientData( c : ClientInfos<Client> ) {
 		var available = c.buf.length - c.bufpos;
@@ -187,51 +269,9 @@ class ThreadSocketServer<Client,Message> {
 		c.bufpos = len;
 	}
 
-	function loopThread( t : ThreadInfos ) {
-		if( t.socks.length > 0 )
-			for( s in t.p.poll( t.socks, connectLag ) ) {
-				var infos : ClientInfos<Client> = s.custom;
-				try {
-					readClientData(infos);
-				} catch( e : Dynamic ) {
-					t.socks.remove(s);
-					if( !Std.is(e,haxe.io.Eof) && !Std.is(e,haxe.io.Error) )
-						logError(e);
-					work(doClientDisconnected.bind(s,infos.client));
-				}
-			}
-		while( true ) {
-			var m : { s : Socket, cnx : Bool } = Thread.readMessage( t.socks.length == 0 );
-			if( m == null )
-				break;
-			if( m.cnx )
-				t.socks.push( m.s );
-			else if( t.socks.remove( m.s ) ) {
-				var infos : ClientInfos<Client> = m.s.custom;
-				work( doClientDisconnected.bind( m.s, infos.client ) );
-			}
-		}
-	}
-
 	function doClientDisconnected( s : Socket, c : Client ) {
 		try s.close() catch( e : Dynamic ) {};
 		clientDisconnected(c);
-	}
-
-	function runWorker() {
-		while( true ) {
-			var f = Thread.readMessage(true);
-			try f() catch( e : Dynamic ) logError(e);
-			try afterEvent() catch( e : Dynamic ) logError(e);
-		}
-	}
-
-	function logError( e : Dynamic ) {
-		var stack = haxe.CallStack.exceptionStack();
-		if( Thread.current() == worker )
-			onError( e, stack );
-		else
-			work( onError.bind( e, stack ) );
 	}
 
 	function addClient( s : Socket ) {
@@ -244,42 +284,31 @@ class ThreadSocketServer<Client,Message> {
 					client : clientConnected( s ),
 					sock : s,
 					buf : haxe.io.Bytes.alloc(initialBufferSize),
-					bufpos : 0,
+					bufpos : 0
 				};
 				s.custom = infos;
-				infos.thread.t.sendMessage( { s : s, cnx : true } );
+				infos.thread.t.sendMessage( ThreadMessage.Socket(s, true) );
 				return;
 			}
 		}
 		refuseClient(s);
 	}
 
+    public function stopClient( s : Socket ) {
+        var infos : ClientInfos<Client> = s.custom;
+        try s.shutdown(true,true) catch( e : Dynamic ) {};
+        infos.thread.t.sendMessage( ThreadMessage.Socket(s, false) );
+    }
+
 	function refuseClient( s : Socket) {
 		s.close(); // we have reached maximum number of active clients
 	}
 
-	function runTimer() {
-		var l = new Lock();
-		while( true ) {
-			l.wait( updateTime );
-			work( update );
-		}
-	}
-
-	function init() {
-        sockWorker = Thread.create( runSockWorker );
-		worker = Thread.create( runWorker );
-		timer = Thread.create( runTimer );
-		for( i in 0...nthreads ) {
-			var t = {
-				id : i,
-				t : null,
-				socks : new Array(),
-				p : new Poll( maxSockPerThread ),
-			};
-			threads.push(t);
-			t.t = Thread.create( runThread.bind( t ) );
-		}
-	}
-
+    function logError( e : Dynamic ) {
+        var stack = haxe.CallStack.exceptionStack();
+        if( Thread.current() == worker )
+            onError( e, stack );
+        else
+            work( onError.bind( e, stack ) );
+    }
 }
