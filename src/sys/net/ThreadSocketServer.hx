@@ -99,8 +99,7 @@ class ThreadSocketServer<Client,Message> {
         if(sockWorker != null)
         {
             sockWorker.sendMessage(ThreadMessage.Stop);
-            sock.shutdown(true, true);
-            sock.close();
+            sockWorker = null;
         }
     }
 
@@ -151,6 +150,8 @@ class ThreadSocketServer<Client,Message> {
             try addSocket( sock.accept() ) catch(e:Dynamic) logError(e);
         }
 
+        sock.shutdown(true, true);
+        sock.close();
         sock = null;
 
         timer.sendMessage(ThreadMessage.Stop);
@@ -166,8 +167,6 @@ class ThreadSocketServer<Client,Message> {
             }
             t.t.sendMessage(ThreadMessage.Stop);
         }
-
-        sockWorker = null;
     }
 
     function runWorker() {
