@@ -19,11 +19,11 @@ class WebServer<Client:WebServerClient> extends ThreadSocketServer<Client,HTTPRe
 		super( host, port );
 	}
 
-	override function clientMessage( c : Client, m : HTTPRequest ) {
+	public override function clientMessage( c : Client, m : HTTPRequest ) {
 		c.processRequest( m );
 	}
 
-	override function readClientMessage( c : Client, buf : Bytes, pos : Int, len : Int ) : { msg : HTTPRequest, len : Int } {
+	public override function readClientMessage( c : Client, buf : Bytes, pos : Int, len : Int ) : { msg : HTTPRequest, len : Int } {
 		var r : HTTPRequest = null;
 		try r = c.readRequest( buf, pos, len ) catch(e:HTTPError) {
 			trace(e);
@@ -33,5 +33,5 @@ class WebServer<Client:WebServerClient> extends ThreadSocketServer<Client,HTTPRe
 		}
 		return { msg : r, len : len };
 	}
-	
+
 }
