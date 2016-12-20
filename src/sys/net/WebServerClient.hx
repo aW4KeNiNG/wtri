@@ -16,10 +16,18 @@ private typedef HTTPReturnCode = {
 */
 class WebServerClient {
 
+    public inline function log(message:String):Void {
+        #if debug
+        trace('${fingerprint} INFO: ${message}');
+        #end
+    }
+
 	var socket : Socket;
 	var output : haxe.io.Output;
 	var responseCode : HTTPReturnCode;
 	var responseHeaders : HTTPHeaders;
+    var keepAlive : Bool = false;
+    var fingerprint : String;
 
 	public function new( socket : Socket ) {
 		this.socket = socket;
@@ -37,6 +45,11 @@ class WebServerClient {
 		Process http request
 	*/
 	public function processRequest( r : HTTPRequest, ?root : String ) {
+        fingerprint = r.fingerprint;
+        logHTTPRequest( r );
+
+        keepAlive = r.headers.exists("Connection")
+                    && r.headers.get("Connection").toLowerCase() == "keep-alive";
 		responseCode = { code : 200, text : "OK" };
 		responseHeaders = createResponseHeaders();
 	}
@@ -47,17 +60,8 @@ class WebServerClient {
 
 	function createResponseHeaders() : HTTPHeaders {
 		var h = new HTTPHeaders();
-		#if cpp //TODO  Date.format %A- not implemented yet
-		h.set( 'Date', Date.now().toString() );
-		#elseif neko
-		h.set( 'Date', DateTools.format( Date.now(), '%A, %e %B %Y %I:%M:%S %Z' ) );
-		#end
 		/*
-		if( keepAlive ) {
-			h.set( 'Connection', 'Keep-Alive' );
-			h.set( 'Keep-Alive', 'timeout=5, max=99' );
-		}
-		if( compression ) {
+        if( compression ) {
 			h.set( 'Content-Encoding', 'gzip' );
 		}
 		*/
@@ -72,19 +76,66 @@ class WebServerClient {
 		output.writeString( data );
 	}
 
-	function sendError( code : Int, status : String, ?content : String ) {
+	function sendResponse(code : Int, status : String, content : String = "" ) {
 		responseCode = { code : code, text : status };
-		if( content != null ) responseHeaders.set( 'Content-Length', Std.string( content.length ) );
+		responseHeaders.set( 'Content-Length', Std.string( content.length ) );
 		sendHeaders();
-		if( content != null ) output.writeString( content );
+		output.writeString( content );
 	}
 
 	function sendHeaders() {
-		writeLine( 'HTTP/1.1 ${responseCode.code} ${responseCode.text}' );
+        logHTTPResponse();
+
+        writeLine( 'HTTP/1.1 ${responseCode.code} ${responseCode.text}' );
 		for( k in responseHeaders.keys() ) writeLine( '$k: ${responseHeaders.get(k)}' );
 		writeLine();
 	}
 
 	inline function writeLine( s : String = "" ) output.writeString( '$s\r\n' );
 
+    inline function date2String(date:Date):String
+    {
+        #if cpp //TODO  Date.format %Z- not implemented yet
+        return DateTools.format(date, '%a, %e %b %Y %I:%M:%S');
+        #else
+        return DateTools.format(date, '%a, %e %b %Y %I:%M:%S %Z');
+        #end
+    }
+
+    inline function logHTTPRequest( r : HTTPRequest ) {
+        #if debug
+        var url = ( r.url == null || r.url.length == 0 ) ? '/' : r.url;
+        log( 'Request: ${date2String(Date.now())}');
+        log( 'HTTP > ${Std.string( r.method ).toUpperCase()} ${r.url} HTTP/${r.version}');
+        for( k in r.headers.keys() )
+            log( 'HTTP > $k: ${r.headers.get(k)}');
+        #end
+    }
+
+    inline function logHTTPResponse() {
+        #if debug
+        log( 'Response: ${date2String(Date.now())}');
+        log( 'HTTP > HTTP/1.1 ${responseCode.code} ${responseCode.text}');
+        for( k in responseHeaders.keys() )
+            log( 'HTTP > $k: ${responseHeaders.get(k)}');
+        #end
+    }
+
+    //##########################################################################################
+    //
+    // UID Generator
+    //
+    //##########################################################################################
+
+    private static var UID_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    public static function randomUID(?size:Int=32):String
+    {
+        var nchars = UID_CHARS.length;
+        var uid = new StringBuf();
+        for (i in 0 ... size){
+            uid.addChar(UID_CHARS.charCodeAt( Std.random(nchars) ));
+        }
+        return uid.toString();
+    }
 }

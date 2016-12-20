@@ -1,6 +1,5 @@
 package wtri;
 
-import Sys.println;
 import sys.FileSystem;
 import sys.net.Socket;
 
@@ -24,7 +23,7 @@ class WebServer extends sys.net.WebServer<WebServerClient> {
 	}
 
 	public override function start() {
-		println( 'Starting webserver: $host:$port:$root' );
+		trace( 'Starting webserver: $host:$port:$root' );
 		super.start();
 	}
 

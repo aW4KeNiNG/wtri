@@ -1,22 +1,33 @@
 package wtri;
 
+import haxe.net.HTTPRequest;
+import sys.io.FileInput;
+import sys.FileStat;
+import sys.io.FileSeek;
+import sys.net.WebServerClient;
+import haxe.io.Bytes;
 import sys.FileSystem;
 import sys.io.File;
 import sys.net.Socket;
 import haxe.Template;
 import haxe.net.HTTPHeaders;
-import haxe.net.HTTPRequest;
 import haxe.net.HTTPStatusCode;
 import mime.Mime;
 
 using StringTools;
 
-class WebServerClient extends sys.net.WebServerClient {
+class WebServerClient extends sys.net.WebServerClient
+{
+    static inline private var MAX_BUFFER_SIZE:Int = 1048576;
 
 	public var indexFileNames : Array<String>;
 	public var indexFileTypes : Array<String>;
 
+    public var isBlocked:Bool = false;
+
 	var root : String;
+
+    var isChunked:Bool;
 
 	public function new( socket : Socket, root : String ) {
 
@@ -32,7 +43,7 @@ class WebServerClient extends sys.net.WebServerClient {
 	*/
 	public override function processRequest( r : HTTPRequest, ?root : String ) {
 
-		super.processRequest( r, root );
+        super.processRequest( r, root );
 		
 		var path = (root != null) ? root : this.root;
 		path += r.url;
@@ -41,28 +52,127 @@ class WebServerClient extends sys.net.WebServerClient {
 		if( filePath == null ) {
 			fileNotFound( path, r.url );
 		} else {
-			var contentType : String = null;
+            var stat:FileStat = FileSystem.stat( path );
+            var etag:String = getETag(path);
+
+            if( r.headers.exists( 'If-Match' ) ) {
+                var requestETag = r.headers.get( 'If-Match' );
+                if(requestETag != "*" && requestETag != etag) {
+                    sendResponse(HTTPStatusCode.PRECONDITION_FAILED, "Precondition Failed");
+                    return;
+                }
+            }
+
+            if( r.headers.exists( 'If-None-Match' ) ) {
+                var requestETag = r.headers.get( 'If-None-Match' );
+                if(requestETag == "*" && requestETag == etag) {
+                    sendResponse(HTTPStatusCode.NOT_MODIFIED, "Not Modified");
+                    return;
+                }
+            }
+
+            var fromRange:Int = -1;
+            var toRange:Int = -1;
+            if( r.headers.exists( 'Range' ) ) {
+                var range = r.headers.get( 'Range' );
+                //TODO - accept multipart/byteranges
+                if(StringTools.startsWith(range, "bytes"))
+                {
+                    var rangeRE = ~/(\d+)-(\d*)/;
+                    if(rangeRE.match(range))
+                    {
+                        fromRange = Std.parseInt(rangeRE.matched(1));
+                        var toRangeStr = rangeRE.matched(2);
+                        if(toRangeStr != "")
+                            toRange = Std.parseInt(toRangeStr);
+
+                        if(toRange != -1)
+                        {
+                            if(toRange > stat.size)
+                            {
+                                sendResponse(HTTPStatusCode.REQUEST_RANGE_NOT_SATISFIABLE, "Requested range not satisfiable");
+                                return;
+                            }
+                            else
+                            {
+                                responseCode = { code : 206, text : "Partial Content" };
+                                responseHeaders.set( 'Content-Range', 'bytes ${Std.string(fromRange)}-${Std.string(toRange)}/${Std.string(toRange-fromRange)}' );
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    sendResponse(HTTPStatusCode.BAD_REQUEST, "Bad Request");
+                    return;
+                }
+            }
+
+            if(fromRange < 0)
+            {
+                fromRange = 0;
+            }
+
+            if(toRange < 0)
+            {
+                toRange = stat.size;
+            }
+
+            isChunked = false;//hasRange;  //TODO - disabled for now. It doesn't work with videos in Chrome
+            //isChunked = totalRange > MAX_BUFFER_SIZE;
+            if(isChunked)
+            {
+                responseHeaders.set( 'Transfer-Encoding', 'chunked' );
+            }
+
+            var contentType : String = null;
 //			if( r.headers.exists( 'Accept' ) ) {
 //				var ctype = r.headers.get( 'Accept' );
 //				ctype = ctype.substr( 0, ctype.indexOf( ',' ) ).trim();
 //				if( Mime.extension( ctype ) != null ) contentType = ctype;
 //			}
-			if( contentType == null ) contentType = getFileContentType( filePath );
-			responseHeaders.set( 'Content-Type', contentType );
-			/* TODO execute neko modules
-			if( r.url.endsWith('.n') ) {
-				var l = neko.vm.Loader.local();
-				var m = l.loadModule('ext.n',l );
-				trace(m);
-				//trace( m.execute() );
-				sendData("NEKO!");
-			}
-			*/
-			sendFile( filePath );
-		}
+            if( contentType == null )
+                contentType = getFileContentType( filePath );
 
-		logHTTPRequest( r );
-	}
+            responseHeaders.set( 'Content-Type', contentType );
+            responseHeaders.set( 'Last-Modified', date2String(stat.mtime) );
+            responseHeaders.set( 'ETag', etag );
+//            responseHeaders.set( 'Accept-Ranges', 'bytes' );  //TODO - not play videos in Chrome
+            responseHeaders.set( 'Accept-Ranges', 'none' );
+            responseHeaders.set( 'Content-Length', Std.string(toRange - fromRange) );
+            responseHeaders.set( 'Date', date2String(Date.now()) );
+
+//            if(keepAlive)
+//            {
+//                responseHeaders.set( 'Connection', 'Keep-Alive' );
+//                responseHeaders.set( 'Keep-Alive', 'timeout=5, max=100' );
+//            }
+
+            var f:FileInput = File.read( path, true );
+            if(fromRange > 0)
+            {
+                f.seek(fromRange, FileSeek.SeekCur);
+            }
+
+            try
+            {
+                sendHeaders();
+
+                sendFile(filePath, fromRange, toRange);
+
+                log("End");
+                f.close();
+            }
+            catch (e:Dynamic)
+            {
+                log('Server exception $e');
+                f.close();
+                throw e;
+
+                //TODO - error 500 Internal Server Error if it is not blocked or eof
+            }
+        }
+    }
 
 	override function createResponseHeaders() : HTTPHeaders {
 		var h = super.createResponseHeaders();
@@ -88,13 +198,12 @@ class WebServerClient extends sys.net.WebServerClient {
 		return null;
 	}
 
-	function fileNotFound( path : String, url : String, ?html : String ) {
+	function fileNotFound( path : String, url : String, html : String = null ) {
 		if( !FileSystem.exists( path ) || !FileSystem.isDirectory( path ) ) {
-			if( html == null )
-				html = createTemplateHtml( 'error', { code : HTTPStatusCode.NOT_FOUND, status : 'Not Found', content : '<h1>404 Not Found</h1>' } );
-			sendData( html );
+            sendResponse(HTTPStatusCode.NOT_FOUND, "Not Found");
 			return;
 		}
+
 		var now = Date.now();
 		var dirs = new Array<Dynamic>();
 		var files = new Array<Dynamic>();
@@ -127,29 +236,47 @@ class WebServerClient extends sys.net.WebServerClient {
 		sendData( createTemplateHtml( 'index', ctx ) );
 	}
 
-	function sendFile( path : String ) {
-		var stat = FileSystem.stat( path );
-		responseHeaders.set( 'Content-Length', Std.string( stat.size ) );
-		sendHeaders();
-		var f = File.read( path, true );
-		//if( size < bufSize ) //TODO
-		output.writeInput( f, stat.size );
-		//TODO compression
-		//output.writeString( neko.zip.Compress.run( f.readAll(), 6 ).toString() );
-		f.close();
-	}
+	function sendFile(path : String, fromRange:Int, toRange:Int) {
+        var totalRange:Int = toRange - fromRange;
 
-	function logHTTPRequest( r : HTTPRequest ) {
-		var s = new StringBuf();
-		var now = Date.now();
-		var time = DateTools.format( Date.now(), '%d/%b/%Y|%H:%M:%S' );
-		s.add( time );
-		s.add( ' - ' );
-		s.add( if( r.method == null ) 'GET' else Std.string( r.method ).toUpperCase() );
-		s.add( ' - ' );
-		s.add( '"'+(if( r.url == null || r.url.length == 0 ) '/' else r.url )+'"' );
-		Sys.println( s.toString() );
-	}
+        var offset:Int = fromRange;
+        var memoryLength = totalRange > MAX_BUFFER_SIZE ? MAX_BUFFER_SIZE : totalRange;
+        var bytes:Bytes = Bytes.alloc(memoryLength);
+        var size:Int;
+        while(offset < toRange)
+        {
+            size = memoryLength;
+            if(offset + size > toRange)
+                size = toRange - offset;
+
+            log('Serving from $offset to ${offset+size}');
+            f.readBytes(bytes, 0, size);
+
+            if(isChunked)
+            {
+                writeLine('${StringTools.hex(size)}');
+                output.writeFullBytes(bytes, 0, size);
+                writeLine();
+            }
+            else
+            {
+                output.writeFullBytes(bytes, 0, size);
+            }
+
+
+            offset += size;
+        }
+
+        if(isChunked)
+        {
+            writeLine("0");
+            writeLine();
+        }
+    }
+
+    function getETag(url:String):String {
+        return '"${haxe.crypto.Md5.encode('$url - ${stat.mtime.getTime()}')}"';
+    }
 
 	static inline function getDateTime( ?time : Date ) : String {
 		if( time == null ) time = Date.now();

@@ -1,5 +1,6 @@
 package haxe.net;
 
+import sys.net.WebServerClient;
 import haxe.io.Bytes;
 import haxe.io.BytesInput;
 
@@ -13,10 +14,12 @@ class HTTPRequest {
 	//public var ?contentType : String,
 	public var params : Map<String,String>;
 	public var data : String; // post data
+    public var fingerprint : String;
 
 	public function new( url : String, version : String ) {
 		this.url = url;
 		this.version = version;
+        this.fingerprint = WebServerClient.randomUID(8);
 		headers = new Map();
 		params = new Map();
 	}
