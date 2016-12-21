@@ -53,7 +53,7 @@ class WebServerClient extends sys.net.WebServerClient
 			fileNotFound( path, r.url );
 		} else {
             var stat:FileStat = FileSystem.stat( path );
-            var etag:String = getETag(path, stat.mtime);
+            var etag:String = getETag(filePath, stat);
 
             if( r.headers.exists( 'If-Match' ) ) {
                 var requestETag = r.headers.get( 'If-Match' );
@@ -125,6 +125,13 @@ class WebServerClient extends sys.net.WebServerClient
                 responseHeaders.set( 'Transfer-Encoding', 'chunked' );
             }
 
+            var host = r.headers.get("Host");
+            if(host == null || StringTools.startsWith("localhost")) {
+                responseHeaders.set( 'Cache-Control', 'no-cache, no-store, must-revalidate' );
+                responseHeaders.set( 'Pragma', 'no-cache' );
+                responseHeaders.set( 'Expires', '0' );
+            }
+
             var contentType : String = null;
 //			if( r.headers.exists( 'Accept' ) ) {
 //				var ctype = r.headers.get( 'Accept' );
@@ -158,7 +165,7 @@ class WebServerClient extends sys.net.WebServerClient
             {
                 sendHeaders();
 
-                sendFile(f, filePath, fromRange, toRange);
+                sendFile(f, fromRange, toRange);
 
                 log("End");
                 f.close();
@@ -236,7 +243,7 @@ class WebServerClient extends sys.net.WebServerClient
 		sendData( createTemplateHtml( 'index', ctx ) );
 	}
 
-	function sendFile(f:FileInput, path : String, fromRange:Int, toRange:Int) {
+	function sendFile(f:FileInput, fromRange:Int, toRange:Int) {
         var totalRange:Int = toRange - fromRange;
 
         var offset:Int = fromRange;
@@ -274,8 +281,8 @@ class WebServerClient extends sys.net.WebServerClient
         }
     }
 
-    function getETag(url:String, modificationTime:Date):String {
-        return '"${haxe.crypto.Md5.encode('$url - ${modificationTime.getTime()}')}"';
+    function getETag(url:String, stat:FileStat):String {
+        return '"${haxe.crypto.Md5.encode('$url - ${stat.mtime.getTime()} - ${stat.size}')}"';
     }
 
 	static inline function getDateTime( ?time : Date ) : String {
