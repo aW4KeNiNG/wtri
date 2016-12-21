@@ -95,6 +95,10 @@ class ThreadSocketServer<Client, Message> {
         if(newClientsWorker != null)
         {
             newClientsWorker.sendMessage(ThreadMessage.Stop);
+            if(sock != null)
+            {
+                sock.close();
+            }
             newClientsWorker = null;
         }
     }
@@ -148,7 +152,6 @@ class ThreadSocketServer<Client, Message> {
             {
                 break;
             }
-
             try addSocket( sock.accept() ) catch(e:Dynamic) logError(e);
         }
 
@@ -210,6 +213,8 @@ class ThreadSocketServer<Client, Message> {
                     switch(msg)
                     {
                         case ThreadMessage.Stop:
+                            for(s in threadInfo.socks)
+                                try s.shutdown(true,true) catch( e : Dynamic ) {};
                             return;
                         case ThreadMessage.Socket(socket, cnx):
                             if( cnx ) {
