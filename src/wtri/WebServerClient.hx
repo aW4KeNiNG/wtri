@@ -125,8 +125,8 @@ class WebServerClient extends sys.net.WebServerClient
                 responseHeaders.set( 'Transfer-Encoding', 'chunked' );
             }
 
-            var host = r.headers.get("Host");
-            if(host == null || StringTools.startsWith("localhost")) {
+            var host:String = r.headers.get("Host");
+            if(host == null || StringTools.startsWith(host, "localhost")) {
                 responseHeaders.set( 'Cache-Control', 'no-cache, no-store, must-revalidate' );
                 responseHeaders.set( 'Pragma', 'no-cache' );
                 responseHeaders.set( 'Expires', '0' );
