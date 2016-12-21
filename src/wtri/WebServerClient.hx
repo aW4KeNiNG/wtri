@@ -53,7 +53,7 @@ class WebServerClient extends sys.net.WebServerClient
 			fileNotFound( path, r.url );
 		} else {
             var stat:FileStat = FileSystem.stat( path );
-            var etag:String = getETag(path);
+            var etag:String = getETag(path, stat.mtime);
 
             if( r.headers.exists( 'If-Match' ) ) {
                 var requestETag = r.headers.get( 'If-Match' );
@@ -158,7 +158,7 @@ class WebServerClient extends sys.net.WebServerClient
             {
                 sendHeaders();
 
-                sendFile(filePath, fromRange, toRange);
+                sendFile(f, filePath, fromRange, toRange);
 
                 log("End");
                 f.close();
@@ -236,7 +236,7 @@ class WebServerClient extends sys.net.WebServerClient
 		sendData( createTemplateHtml( 'index', ctx ) );
 	}
 
-	function sendFile(path : String, fromRange:Int, toRange:Int) {
+	function sendFile(f:FileInput, path : String, fromRange:Int, toRange:Int) {
         var totalRange:Int = toRange - fromRange;
 
         var offset:Int = fromRange;
@@ -274,8 +274,8 @@ class WebServerClient extends sys.net.WebServerClient
         }
     }
 
-    function getETag(url:String):String {
-        return '"${haxe.crypto.Md5.encode('$url - ${stat.mtime.getTime()}')}"';
+    function getETag(url:String, modificationTime:Date):String {
+        return '"${haxe.crypto.Md5.encode('$url - ${modificationTime.getTime()}')}"';
     }
 
 	static inline function getDateTime( ?time : Date ) : String {
