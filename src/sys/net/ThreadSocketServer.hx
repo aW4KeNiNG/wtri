@@ -319,11 +319,13 @@ class ThreadSocketServer<Client, Message> {
 		s.close(); // we have reached maximum number of active clients
 	}
 
-    function logError( e : Dynamic ) {
+    inline function logError( e : Dynamic ) {
+        #if wtri-logerror
         var stack = haxe.CallStack.exceptionStack();
         if( Thread.current() == worker )
             onError( e, stack );
         else
             work( onError.bind( e, stack ) );
+        #end
     }
 }
