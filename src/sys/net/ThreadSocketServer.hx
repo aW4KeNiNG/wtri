@@ -219,7 +219,7 @@ class ThreadSocketServer<Client, Message> {
                         case ThreadMessage.Stop:
                             for(s in threadInfo.socks)
                             {
-                                try { #if mobile s.shutdown(true,true) #else sock.close(); #end } catch( e : Dynamic ) {};
+                                try { #if mobile s.shutdown(true,true) #else sock.close() #end; } catch( e : Dynamic ) {};
                             }
                             return;
                         case ThreadMessage.Socket(socket, cnx):
