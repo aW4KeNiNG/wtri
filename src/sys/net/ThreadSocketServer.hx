@@ -320,7 +320,7 @@ class ThreadSocketServer<Client, Message> {
 	}
 
     inline function logError( e : Dynamic ) {
-        #if wtri-logerror
+        #if wtrilogerror
         var stack = haxe.CallStack.exceptionStack();
         if( Thread.current() == worker )
             onError( e, stack );
