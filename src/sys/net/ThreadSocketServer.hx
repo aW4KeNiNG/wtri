@@ -99,9 +99,13 @@ class ThreadSocketServer<Client, Message> {
             {
                 #if mobile
                 sock.shutdown(true, true);
-                #else
-                sock.close();
                 #end
+
+                try
+                {
+                    sock.close();
+                }
+                catch(e:Dynamic){}
             }
             newClientsWorker = null;
         }
