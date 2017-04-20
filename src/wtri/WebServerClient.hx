@@ -96,7 +96,7 @@ class WebServerClient extends sys.net.WebServerClient
                             else
                             {
                                 responseCode = { code : 206, text : "Partial Content" };
-                                responseHeaders.set( 'Content-Range', 'bytes ${Std.string(fromRange)}-${Std.string(toRange)}/${Std.string(toRange-fromRange)}' );
+                                responseHeaders.set( 'Content-Range', 'bytes ${Std.string(fromRange)}-${Std.string(toRange)}/${stat.size==0 ? '*' : Std.string(stat.size)}' );
                             }
                         }
                     }
@@ -115,7 +115,7 @@ class WebServerClient extends sys.net.WebServerClient
 
             if(toRange < 0)
             {
-                toRange = stat.size;
+                toRange = stat.size-1;
             }
 
             isChunked = false;//hasRange;  //TODO - disabled for now. It doesn't work with videos in Chrome
@@ -146,7 +146,7 @@ class WebServerClient extends sys.net.WebServerClient
             responseHeaders.set( 'ETag', etag );
 //            responseHeaders.set( 'Accept-Ranges', 'bytes' );  //TODO - not play videos in Chrome
             responseHeaders.set( 'Accept-Ranges', 'none' );
-            responseHeaders.set( 'Content-Length', Std.string(toRange - fromRange) );
+            responseHeaders.set( 'Content-Length', Std.string(toRange - fromRange + 1) );
             responseHeaders.set( 'Date', date2String(Date.now()) );
 
 //            if(keepAlive)
@@ -244,6 +244,7 @@ class WebServerClient extends sys.net.WebServerClient
 	}
 
 	function sendFile(f:FileInput, fromRange:Int, toRange:Int) {
+        toRange += 1;
         var totalRange:Int = toRange - fromRange;
 
         var offset:Int = fromRange;
