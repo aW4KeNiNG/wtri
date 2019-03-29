@@ -73,37 +73,35 @@ class WebServerClient extends sys.net.WebServerClient
 
             var fromRange:Int = -1;
             var toRange:Int = -1;
-            if( r.headers.exists( 'Range' ) ) {
+            var hasRangeRequest:Bool = r.headers.exists('Range');
+            if( hasRangeRequest ) {
                 var range = r.headers.get( 'Range' );
                 //TODO - accept multipart/byteranges
-                if(StringTools.startsWith(range, "bytes"))
+                var rangeRE = ~/(\d+)-(\d*)/;
+                if(StringTools.startsWith(range, "bytes") && rangeRE.match(range))
                 {
-                    var rangeRE = ~/(\d+)-(\d*)/;
-                    if(rangeRE.match(range))
-                    {
-                        fromRange = Std.parseInt(rangeRE.matched(1));
-                        var toRangeStr = rangeRE.matched(2);
-                        if(toRangeStr != "")
-                            toRange = Std.parseInt(toRangeStr);
+                    fromRange = Std.parseInt(rangeRE.matched(1));
+                    var toRangeStr = rangeRE.matched(2);
+                    if(toRangeStr != "")
+                        toRange = Std.parseInt(toRangeStr);
+                    else if(stat.size > 0)
+                        toRange = stat.size - 1;
 
-                        if(toRange != -1)
-                        {
-                            if(toRange > stat.size)
-                            {
-                                sendResponse(HTTPStatusCode.REQUEST_RANGE_NOT_SATISFIABLE, "Requested range not satisfiable");
-                                return;
-                            }
-                            else
-                            {
-                                responseCode = { code : 206, text : "Partial Content" };
-                                responseHeaders.set( 'Content-Range', 'bytes ${Std.string(fromRange)}-${Std.string(toRange)}/${stat.size==0 ? '*' : Std.string(stat.size)}' );
-                            }
-                        }
+                    if(toRange > stat.size)
+                    {
+                        responseHeaders.set( 'Content-Range', 'bytes */${Std.string(stat.size)}' );
+                        sendResponse(HTTPStatusCode.REQUEST_RANGE_NOT_SATISFIABLE, "Requested range not satisfiable");
+                        return;
+                    }
+                    else
+                    {
+                        responseCode = { code : 206, text : "Partial Content" };
+                        responseHeaders.set( 'Content-Range', 'bytes ${Std.string(fromRange)}-${toRange != -1 ? Std.string(toRange) : ""}/${stat.size==0 ? '*' : Std.string(stat.size)}' );
                     }
                 }
                 else
                 {
-                    sendResponse(HTTPStatusCode.BAD_REQUEST, "Bad Request");
+                    sendResponse(HTTPStatusCode.REQUEST_RANGE_NOT_SATISFIABLE, "Range Request not satisfiable");
                     return;
                 }
             }
@@ -115,11 +113,10 @@ class WebServerClient extends sys.net.WebServerClient
 
             if(toRange < 0)
             {
-                toRange = stat.size-1;
+                toRange = stat.size;
             }
 
-            isChunked = false;//hasRange;  //TODO - disabled for now. It doesn't work with videos in Chrome
-            //isChunked = totalRange > MAX_BUFFER_SIZE;
+            isChunked = hasRangeRequest && (toRange - fromRange) > MAX_BUFFER_SIZE;
             if(isChunked)
             {
                 responseHeaders.set( 'Transfer-Encoding', 'chunked' );
@@ -144,9 +141,8 @@ class WebServerClient extends sys.net.WebServerClient
             responseHeaders.set( 'Content-Type', contentType );
             responseHeaders.set( 'Last-Modified', date2String(stat.mtime) );
             responseHeaders.set( 'ETag', etag );
-//            responseHeaders.set( 'Accept-Ranges', 'bytes' );  //TODO - not play videos in Chrome
-            responseHeaders.set( 'Accept-Ranges', 'none' );
-            responseHeaders.set( 'Content-Length', Std.string(toRange - fromRange + 1) );
+            responseHeaders.set( 'Accept-Ranges', 'bytes' );
+            responseHeaders.set( 'Content-Length', Std.string(toRange - fromRange) );
             responseHeaders.set( 'Date', date2String(Date.now()) );
 
 //            if(keepAlive)
