@@ -1,21 +1,15 @@
 package sys.net;
 
-/*
-typedef ThreadServer = 
-	#if cpp
-	cpp.net.ThreadServer<Client,Message>
-	#elseif neko
-	neko.net.ThreadServer<Client,Message>
-	#end;
-*/
-
 import sys.net.Socket;
 import haxe.io.Bytes;
-#if cpp
+#if neko
+import neko.vm.Thread;
+import neko.vm.Lock;
+import neko.net.Poll;
+#else
 import cpp.vm.Thread;
 import cpp.vm.Lock;
 import cpp.net.Poll;
-#elseif neko
 #end
 
 private typedef ThreadInfos = {
@@ -39,38 +33,59 @@ enum ThreadMessage
     Socket(s:Socket, cnx:Bool);
 }
 
+
+/**
+    The ThreadServer can be used to easily create a multithreaded server where each thread polls multiple connections.
+    To use it, at a minimum you must override or rebind clientConnected, readClientMessage, and clientMessage and you must define your Client and Message.
+**/
 class ThreadSocketServer<Client, Message> {
-
-	public dynamic function clientConnected( s : Socket ) : Client return null;
-	public dynamic function clientDisconnected( c : Client ) {}
-	public dynamic function readClientMessage( c : Client, buf : Bytes, pos : Int, len : Int ) : { msg : Message, len: Int } { return { msg : null, len : len }; }
-	public dynamic function clientMessage( c : Client, m : Message ) {}
-//	public dynamic function update() {}
-	public dynamic function afterEvent() {}
-	public dynamic function onError( e : Dynamic, stack ) {
-		var s = try Std.string(e) catch(e2:Dynamic) "???" + try "["+Std.string(e2)+"]" catch(e:Dynamic) "";
-		errorOutput.writeString( s + "\n" + haxe.CallStack.toString( stack ) );
-		errorOutput.flush();
-	}
-
 	public var host(default,null) : String;
 	public var port(default,null) : Int;
+
+    /**
+        Number of total connections the server will accept.
+    **/
 	public var numConnections : Int;
 
+    /**
+        Number of server threads.
+    **/
 	public var nthreads : Int;
+
+    /**
+        Polling timeout.
+    **/
 	public var connectLag : Float;
+
+    /**
+        Stream to send error messages.
+    **/
 	public var errorOutput : haxe.io.Output;
+
+    /**
+        Space allocated to buffers when they are created.
+    **/
 	public var initialBufferSize : Int;
+
+    /**
+        Maximum size of buffered data read from a socket. An exception is thrown if the buffer exceeds this value.
+    **/
 	public var maxBufferSize : Int;
+
+    /**
+        Minimum message size.
+    **/
 	public var messageHeaderSize : Int;
-//	public var updateTime : Float;
+
+    /**
+        The most sockets a thread will handle.
+    **/
 	public var maxSockPerThread : Int;
 
 	var threads : Array<ThreadInfos>;
 	var sock : Socket;
     var newClientsWorker : Thread;
 	var worker : Thread;
-//	var timer : Thread;
 
 	public function new( host : String, port : Int ) {
 		this.host = host;
@@ -84,69 +99,56 @@ class ThreadSocketServer<Client, Message> {
 		initialBufferSize = (1 << 10);
 		maxBufferSize = (1 << 16);
 		maxSockPerThread = 64;
-//		updateTime = 1;
 	}
 
+    /**
+        Start the server at the specified host and port.
+    **/
 	public function start() {
-		initServer();
+        newClientsWorker = Thread.create( runNewClientsWorker );
+        worker = Thread.create( runWorker );
+        for( i in 0...nthreads ) {
+            var threadInfo:ThreadInfos = {
+                id : i,
+                worker : null,
+                socks : [],
+                poll : new Poll( maxSockPerThread )
+            };
+            threads.push(threadInfo);
+            threadInfo.worker = Thread.create( runThreadInfoWorker.bind( threadInfo ) );
+        }
 	}
 
+    /**
+        Stop the server.
+    **/
     public function stop() {
         if(newClientsWorker != null)
         {
             newClientsWorker.sendMessage(ThreadMessage.Stop);
-            if(sock != null)
-            {
-                #if mobile
-                sock.shutdown(true, true);
-                #end
-
-                try
-                {
-                    sock.close();
-                }
-                catch(e:Dynamic){}
-            }
+            sock.shutdown(true, true);
+            sock.close();
             newClientsWorker = null;
+
+            worker.sendMessage(ThreadMessage.Stop);
+
+            for( threadInfo in threads ) {
+                var j = threadInfo.socks.length;
+                while(j-- > 0)
+                {
+                    var socket = threadInfo.socks[j];
+                    stopClient(socket);
+                }
+                threadInfo.worker.sendMessage(ThreadMessage.Stop);
+            }
         }
     }
-
-	public function addSocket( s : Socket ) {
-//		s.setBlocking( false );     //TODO don't work with range. Receive block errors and it needs to be managed.
-		work( addClient.bind( s ) );
-	}
-
-	public function sendData( s : Socket, data : String ) {
-		try s.write( data )
-        catch( e : Dynamic ) stopClient( s );
-	}
-
-	public function work( f : Void->Void ) {
-        if(worker != null)
-		    worker.sendMessage(f);
-	}
 
     //*********************************************************
     //
     // Private Methods
     //
     //*********************************************************
-
-    function initServer() {
-        newClientsWorker = Thread.create( runNewClientsWorker );
-        worker = Thread.create( runWorker );
-//        timer = Thread.create( runTimer );
-        for( i in 0...nthreads ) {
-            var threadInfo:ThreadInfos = {
-                id : i,
-                worker : null,
-                socks : new Array(),
-                poll : new Poll( maxSockPerThread )
-            };
-            threads.push(threadInfo);
-            threadInfo.worker = Thread.create( runThreadInfoWorker.bind( threadInfo ) );
-        }
-    }
 
     function runNewClientsWorker() {
         sock = new Socket();
@@ -163,23 +165,7 @@ class ThreadSocketServer<Client, Message> {
             try addSocket( sock.accept() ) catch(e:Dynamic) logError(e);
         }
 
-        sock.shutdown(true, true);
-        sock.close();
         sock = null;
-
-//        timer.sendMessage(ThreadMessage.Stop);
-        worker.sendMessage(ThreadMessage.Stop);
-
-        for( i in 0...nthreads ) {
-            var threadInfos = threads[i];
-            var j = threadInfos.socks.length;
-            while(j-- > 0)
-            {
-                var socket = threadInfos.socks[j];
-                stopClient(socket);
-            }
-            threadInfos.worker.sendMessage(ThreadMessage.Stop);
-        }
     }
 
     function runWorker() {
@@ -206,10 +192,9 @@ class ThreadSocketServer<Client, Message> {
                         try {
                             readClientData(infos);
                         } catch( e : Dynamic ) {
-                            threadInfo.socks.remove(socket);
                             if( !Std.is(e, haxe.io.Eof) && !Std.is(e, haxe.io.Error) )
                                 logError(e);
-                            work(doClientDisconnected.bind(socket,infos.client));
+                            stopClient(socket);
                         }
                     }
                 }
@@ -218,12 +203,13 @@ class ThreadSocketServer<Client, Message> {
                     var msg:ThreadMessage  = Thread.readMessage( threadInfo.socks.length == 0 );
                     if( msg == null )
                         break;
+
                     switch(msg)
                     {
                         case ThreadMessage.Stop:
                             for(s in threadInfo.socks)
                             {
-                                try { #if mobile s.shutdown(true,true) #else sock.close() #end; } catch( e : Dynamic ) {};
+                                s.shutdown(true, true);
                             }
                             return;
                         case ThreadMessage.Socket(socket, cnx):
@@ -243,20 +229,29 @@ class ThreadSocketServer<Client, Message> {
 		}
 	}
 
-//    function runTimer() {
-//        var l = new Lock();
-//        while( true ) {
-//            l.wait( updateTime );
-//
-//            var msg = Thread.readMessage(false);
-//            if((msg != null && msg == ThreadMessage.Stop) || worker == null)
-//            {
-//                timer = null;
-//                break;
-//            }
-//            work( update );
-//        }
-//    }
+    /**
+        Called when the server gets a new connection.
+    **/
+    function addSocket( s : Socket ) {
+//		s.setBlocking( false );     //TODO don't work with range. Receive block errors and it needs to be managed.
+        work( addClient.bind( s ) );
+    }
+
+    /**
+        Send data to a client.
+    **/
+    function sendData( s : Socket, data : String ) {
+        try s.write( data )
+        catch( e : Dynamic ) stopClient( s );
+    }
+
+    /**
+        Internally used to delegate something to the worker thread.
+    **/
+    function work( f : Void->Void ) {
+        if(worker != null)
+            worker.sendMessage(f);
+    }
 
     function addClient( socket : Socket ) {
         var start = Std.random( nthreads );
@@ -280,28 +275,29 @@ class ThreadSocketServer<Client, Message> {
 
 	function readClientData( c : ClientInfos<Client> ) {
 		var available = c.buf.length - c.bufpos;
-		if( available == 0 ) {
-			var nsize = c.buf.length * 2;
-			if( nsize > maxBufferSize ) {
-				nsize = maxBufferSize;
+        if( available == 0 ) {
+			var newSize = c.buf.length * 2;
+			if( newSize > maxBufferSize ) {
+				newSize = maxBufferSize;
 				if( c.buf.length == maxBufferSize )
 					throw "Max buffer size reached";
 			}
-			var nbuf = Bytes.alloc( nsize );
-			nbuf.blit( 0, c.buf, 0, c.bufpos );
-			c.buf = nbuf;
-			available = nsize - c.bufpos;
+			var newBuf = Bytes.alloc( newSize );
+			newBuf.blit( 0, c.buf, 0, c.bufpos );
+			c.buf = newBuf;
+			available = newSize - c.bufpos;
 		}
 		var bytes = c.sock.input.readBytes( c.buf, c.bufpos, available );
 		var pos = 0;
 		var len = c.bufpos + bytes;
-		while( len >= messageHeaderSize ) {
+        while( len >= messageHeaderSize ) {
 			var m = readClientMessage( c.client, c.buf, pos, len );
 			if( m == null )
 				break;
 			pos += m.len;
 			len -= m.len;
-			work( clientMessage.bind( c.client, m.msg ) );
+            clientMessage(c.client, m.msg);
+//            work( clientMessage.bind( c.client, m.msg ) );
 		}
 		if( pos > 0 )
 			c.buf.blit( 0, c.buf, pos, len );
@@ -309,11 +305,14 @@ class ThreadSocketServer<Client, Message> {
 	}
 
 	function doClientDisconnected( s : Socket, c : Client ) {
-		try s.close() catch( e : Dynamic ) {};
-		clientDisconnected(c);
-	}
+        s.close();
+        clientDisconnected(c);
+    }
 
-    public function stopClient( s : Socket ) {
+    /**
+        Shutdown a client's connection and remove them from the server.
+    **/
+    function stopClient( s : Socket ) {
         var infos : ClientInfos<Client> = s.custom;
         try s.shutdown(true,true) catch( e : Dynamic ) {};
         infos.thread.worker.sendMessage( ThreadMessage.Socket(s, false) );
@@ -323,13 +322,55 @@ class ThreadSocketServer<Client, Message> {
 		s.close(); // we have reached maximum number of active clients
 	}
 
-    inline function logError( e : Dynamic ) {
-        #if wtrilogerror
+    function logError( e : Dynamic ) {
         var stack = haxe.CallStack.exceptionStack();
         if( Thread.current() == worker )
             onError( e, stack );
         else
+        {
             work( onError.bind( e, stack ) );
-        #end
+        }
+    }
+
+    //*********************************************************
+    //
+    // Customizable
+    //
+    //*********************************************************
+
+    /**
+        Called when a client connects. Returns a client object.
+    **/
+    public dynamic function clientConnected( s : Socket ) : Client return null;
+
+    /**
+        Called when a client disconnects or an error forces the connection to close.
+    **/
+    public dynamic function clientDisconnected( c : Client ) {}
+
+    /**
+        Called when data has been read from a socket. This method should try to extract a message from the buffer.
+        The available data resides in buf, starts at pos, and is len bytes wide. Return the new message and the number of bytes read from the buffer.
+        If no message could be read, return null.
+    **/
+    public dynamic function readClientMessage( c : Client, buf : Bytes, pos : Int, len : Int ) : { msg : Message, len: Int } { return { msg : null, len : len }; }
+
+    /**
+        Called when a message has been recieved. Message handling code should go here.
+    **/
+    public dynamic function clientMessage( c : Client, m : Message ) {}
+
+    /**
+        Called after a client connects, disconnects, a message is received, or an update is performed.
+    **/
+    public dynamic function afterEvent() {}
+
+    /**
+        Called when an error has ocurred.
+    **/
+    public dynamic function onError( e : Dynamic, stack ) {
+        var s = try Std.string(e) catch(e2:Dynamic) "???" + try "["+Std.string(e2)+"]" catch(e:Dynamic) "";
+        errorOutput.writeString( s + "\n" + haxe.CallStack.toString( stack ) );
+        errorOutput.flush();
     }
 }

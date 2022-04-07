@@ -18,7 +18,8 @@ using StringTools;
 
 class WebServerClient extends sys.net.WebServerClient
 {
-    static inline private var MAX_BUFFER_SIZE:Int = 1048576;
+//    static inline private var MAX_BUFFER_SIZE:Int = 1048576;
+    static inline private var MAX_BUFFER_SIZE:Int = 65536;
 
 	public var indexFileNames : Array<String>;
 	public var indexFileTypes : Array<String>;
@@ -44,7 +45,7 @@ class WebServerClient extends sys.net.WebServerClient
 	public override function processRequest( r : HTTPRequest, ?root : String ) {
 
         super.processRequest( r, root );
-		
+
 		var path = (root != null) ? root : this.root;
 		path += r.url;
 
@@ -113,7 +114,7 @@ class WebServerClient extends sys.net.WebServerClient
 
             if(toRange < 0)
             {
-                toRange = stat.size;
+                toRange = stat.size - 1;
             }
 
             isChunked = hasRangeRequest && (toRange - fromRange) > MAX_BUFFER_SIZE;
@@ -142,38 +143,16 @@ class WebServerClient extends sys.net.WebServerClient
             responseHeaders.set( 'Last-Modified', date2String(stat.mtime) );
             responseHeaders.set( 'ETag', etag );
             responseHeaders.set( 'Accept-Ranges', 'bytes' );
-            responseHeaders.set( 'Content-Length', Std.string(toRange - fromRange) );
+            responseHeaders.set( 'Content-Length', Std.string(toRange - fromRange + 1) );
             responseHeaders.set( 'Date', date2String(Date.now()) );
-
 //            if(keepAlive)
 //            {
 //                responseHeaders.set( 'Connection', 'Keep-Alive' );
 //                responseHeaders.set( 'Keep-Alive', 'timeout=5, max=100' );
 //            }
 
-            var f:FileInput = File.read( path, true );
-            if(fromRange > 0)
-            {
-                f.seek(fromRange, FileSeek.SeekCur);
-            }
-
-            try
-            {
-                sendHeaders();
-
-                sendFile(f, fromRange, toRange);
-
-                log("End");
-                f.close();
-            }
-            catch (e:Dynamic)
-            {
-                log('Server exception $e');
-                f.close();
-                throw e;
-
-                //TODO - error 500 Internal Server Error if it is not blocked or eof
-            }
+            sendHeaders();
+            sendFile(path, fromRange, toRange);
         }
     }
 
@@ -233,13 +212,15 @@ class WebServerClient extends sys.net.WebServerClient
 			//parent : '../',
 			path : url,
 			dirs : dirs,
-			files : files, 
+			files : files,
 			address : WebServer.name+' '+socket.host().host+':'+socket.host().port,
 		};
 		sendData( createTemplateHtml( 'index', ctx ) );
 	}
 
-	function sendFile(f:FileInput, fromRange:Int, toRange:Int) {
+	function sendFile(path:String, fromRange:Int, toRange:Int) {
+        var f:FileInput = File.read( path, true );
+
         toRange += 1;
         var totalRange:Int = toRange - fromRange;
 
@@ -247,34 +228,48 @@ class WebServerClient extends sys.net.WebServerClient
         var memoryLength = totalRange > MAX_BUFFER_SIZE ? MAX_BUFFER_SIZE : totalRange;
         var bytes:Bytes = Bytes.alloc(memoryLength);
         var size:Int;
-        while(offset < toRange)
-        {
-            size = memoryLength;
-            if(offset + size > toRange)
-                size = toRange - offset;
 
-            log('Serving from $offset to ${offset+size}');
-            f.readBytes(bytes, 0, size);
+        if(fromRange > 0)
+        {
+            f.seek(fromRange, FileSeek.SeekCur);
+        }
+
+        try
+        {
+            while(offset < toRange)
+            {
+                size = (offset + memoryLength > toRange) ? toRange - offset : memoryLength;
+                log('Serving from $offset to ${offset+size}. Total: ${size}');
+
+                size = f.readBytes(bytes, 0, size);
+                if(isChunked)
+                {
+                    writeLine('${StringTools.hex(size)}');
+                    output.writeFullBytes(bytes, 0, size);
+                    writeLine();
+                }
+                else
+                {
+                    output.writeFullBytes(bytes, 0, size);
+                }
+
+                offset += size;
+            }
+
+            f.close();
 
             if(isChunked)
             {
-                writeLine('${StringTools.hex(size)}');
-                output.writeFullBytes(bytes, 0, size);
+                writeLine("0");
                 writeLine();
             }
-            else
-            {
-                output.writeFullBytes(bytes, 0, size);
-            }
-
-
-            offset += size;
         }
-
-        if(isChunked)
+        catch (e:Dynamic)
         {
-            writeLine("0");
-            writeLine();
+            f.close();
+            throw e;
+
+            //TODO - error 500 Internal Server Error if it is not blocked or eof
         }
     }
 

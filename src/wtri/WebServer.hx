@@ -17,15 +17,14 @@ class WebServer extends sys.net.WebServer<WebServerClient> {
 	public var root : String;
 
 	public function new( host : String, port : Int, root : String ) {
-		root = FileSystem.fullPath( root.trim() ).addTrailingSlash();
 		super( host, port );
-		this.root = root;
+		this.root = FileSystem.fullPath( root.trim() ).addTrailingSlash();
 	}
 
-	public override function start() {
-		trace( 'Starting webserver: $host:$port:$root' );
-		super.start();
-	}
+//	public override function start() {
+//		trace( 'Starting webserver: $host:$port:$root' );
+//		super.start();
+//	}
 
 	public override function clientConnected( s : Socket ) : WebServerClient {
 		return new WebServerClient( s, root );

@@ -20,11 +20,11 @@ class WebSocketServerClient {
 		Read incoming data
 	*/
 	public function readRequest( buf : Bytes, pos : Int, len : Int ) : String {
-		trace("readRequest");
+//		trace("readRequest");
 		if( !handshaked ) {
 			var r = WebSocketUtil.handshake( new haxe.io.BytesInput( buf ) );
 			if( r == null ) {
-				trace('handshake failed');
+//				trace('handshake failed');
 				return null; //TODO
 			}
 			socket.write( r );

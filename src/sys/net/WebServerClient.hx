@@ -66,6 +66,7 @@ class WebServerClient {
 		}
 		*/
 		//h.set( 'Server', WebServer.name );
+        h.set('Access-Control-Allow-Origin', '*');
 		return h;
 	}
 
