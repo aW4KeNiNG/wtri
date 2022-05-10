@@ -1,4 +1,9 @@
-*.sublime-*
+test/
+cpp/
+out/
+php/
 _*
+*.js
 *.n
-TODO
+*.hl
+*.hdll
