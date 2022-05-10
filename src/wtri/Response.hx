@@ -15,6 +15,7 @@ class Response {
     public var headersSent(default,null) = false;
     public var finished(default,null) = false;
     public var data : Data;
+    public var fingerprint:String;
 
     public var socket(get,never) : Socket;
     inline function get_socket() : Socket return request.socket;
@@ -23,6 +24,7 @@ class Response {
         this.request = request;
         this.protocol = protocol;
         this.headers = (headers != null) ? headers : [];
+        this.fingerprint = request.fingerprint;
     }
     
     public function writeHead( ?code : StatusCode, ?extraHeaders :Headers ) {
@@ -65,7 +67,7 @@ class Response {
         finished = true;
     }
 
-    inline function writeLine( str : String ) {
+    public inline function writeLine( str : String = "" ) {
         socket.write( '$str\r\n' );
     }
 

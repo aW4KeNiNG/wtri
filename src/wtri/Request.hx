@@ -1,5 +1,6 @@
 package wtri;
 
+import wtri.utils.UIDUtils;
 import wtri.http.HeaderName;
 
 class Request {
@@ -15,9 +16,11 @@ class Request {
     public final params : Map<String,String>;
     public final headers = new wtri.http.Headers();
     public final data : Data;
-    
+    public final fingerprint : String;
+
     public function new( socket : Socket, input : haxe.io.Input ) {
         this.socket = socket;
+        this.fingerprint = UIDUtils.randomUID(8);
         var line = input.readLine();
         if( !EXPR_HTTP.match( line ) )
             return throw new Error( BAD_REQUEST );
