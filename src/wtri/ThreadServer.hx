@@ -65,8 +65,13 @@ class ThreadServer
             socketsMutex.acquire();
             for(socket in sockets)
             {
-                socket.socket.shutdown(true, true);
-                socket.socket.close();
+                try
+                {
+                    socket.socket.shutdown(true, true);
+                    socket.socket.close();
+                }
+                catch(e)
+                {}
             }
             sockets.splice(0, sockets.length);
             socketsMutex.release();
