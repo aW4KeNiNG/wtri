@@ -18,6 +18,7 @@ class ThreadServer
     public var listening(default,null) = false;
     public var handle : Request->Response->Void;
     public var threads(default,null):Int;
+    public var port(default, null):Int;
 
     var mainSocket:sys.net.Socket;
     var newClientsWorker:Thread;
@@ -37,6 +38,7 @@ class ThreadServer
     {
         if(!listening)
         {
+            this.port = port;
             listening = true;
             for(i in 0...threads)
             {
