@@ -24,7 +24,9 @@ class WebServerHandler implements wtri.Handler {
 
     public function handle(req:Request, res:Response):Bool {
 
-        final _path = '${path}${StringTools.urlDecode(req.path)}'.normalize();
+        var _path = '${path}${StringTools.urlDecode(req.path)}'.normalize();
+        if(StringTools.startsWith(path, "\\"))
+            _path = '/' + _path;
 
         if(verbose)
             req.logRequest();
