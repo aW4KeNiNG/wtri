@@ -134,6 +134,8 @@ class WebServerHandler implements wtri.Handler {
         res.headers.set('Content-Length', Std.string(toRange - fromRange + 1));
         res.headers.set('Date', DateUtils.date2String(Date.now()));
         res.headers.set('Access-Control-Allow-Origin', '*');
+        res.headers.set('Cross-Origin-Embedder-Policy', 'require-corp');
+        res.headers.set('Cross-Origin-Opener-Policy', 'same-origin');
 //            if(keepAlive)
 //            {
 //                res.headers.set( 'Connection', 'Keep-Alive' );
